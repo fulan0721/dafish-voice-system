@@ -264,6 +264,15 @@ function analyzeSilence(wav16) {
   return { start: Math.max(0, start - 0.1), end: Math.min(duration, end + 0.1), duration };
 }
 
+function updateRefAudioPath(file, name) {
+  let s = fs.readFileSync(file, 'utf8');
+  const re = /const TTS_REF_AUDIO = process\.env\.GPT_SOVITS_REF \?\? path\.join\(ROOT, 'ref', '[^']*'\);/;
+  if (!re.test(s)) return false;
+  s = s.replace(re, `const TTS_REF_AUDIO = process.env.GPT_SOVITS_REF ?? path.join(ROOT, 'ref', '${name}');`);
+  fs.writeFileSync(file, s, 'utf8');
+  return true;
+}
+
 function readConstString(src, marker) {
   const idx = src.indexOf(marker);
   if (idx < 0) return '';
@@ -332,18 +341,22 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && pathname === '/api/voice/current') {
-      const ref = path.join(BRIDGE, 'ref', 'reference.wav');
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(path.join(STATE, 'current-voice.json'), 'utf8')); } catch {}
+      const ref = (meta.refPath && fs.existsSync(meta.refPath)) ? meta.refPath : path.join(BRIDGE, 'ref', 'reference.wav');
       if (!fs.existsSync(ref)) return json(res, 200, { ok: false, error: '还没有参考音频' });
       const buf = fs.readFileSync(ref);
       const st = fs.statSync(ref);
       const src = fs.readFileSync(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'utf8');
+      const sha = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12);
       return json(res, 200, {
         ok: true,
         file: ref,
         size: buf.length,
         mtime: st.mtimeMs,
         updated: fmtTime(st.mtimeMs),
-        sha: crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12),
+        sha,
+        source: meta.sha === sha ? (meta.source || '') : '',
         seconds: wavDuration(buf),
         text: readConstString(src, 'TTS_REF_TEXT'),
         lang: readConstString(src, 'TTS_REF_LANG'),
@@ -404,7 +417,7 @@ const server = http.createServer(async (req, res) => {
       run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(seconds), '-i', wav16, '-ar', '16000', '-ac', '1', wav16Trim], { timeout: 60000 });
       const asr = run(PY, [ASR_SCRIPT, wav16Trim], { timeout: 180000, env: { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ASR_LANG: lang } });
       const text = asr.ok ? String(asr.out).trim().split(/\r?\n/).pop() || '' : '';
-      analyses.set(id, { wav32, text, seconds, lang, createdAt: Date.now() });
+      analyses.set(id, { wav32, text, seconds, lang, name, createdAt: Date.now() });
       log(`analyze ${id}: ${seconds.toFixed(2)}s text=${text.slice(0, 40)}`);
       return json(res, 200, {
         ok: true, id, text, lang, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)),
@@ -424,14 +437,20 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(path.join(BRIDGE, 'ref'))) fs.mkdirSync(path.join(BRIDGE, 'ref'), { recursive: true });
       const backup = path.join(BRIDGE, 'ref', `reference-backup-${Date.now()}.wav`);
       const target = path.join(BRIDGE, 'ref', 'reference.wav');
+      const sha = crypto.createHash('sha1').update(fs.readFileSync(item.wav32)).digest('hex').slice(0, 12);
+      const versionedName = `reference-${sha}.wav`;
+      const versioned = path.join(BRIDGE, 'ref', versionedName);
       if (fs.existsSync(target)) fs.copyFileSync(target, backup);
       fs.copyFileSync(item.wav32, target);
+      fs.copyFileSync(item.wav32, versioned);
       const a = replaceConstString(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'TTS_REF_TEXT', text);
       const b = replaceConstString(path.join(BRIDGE, 'src', 'mcp-voice-tts.js'), 'REF_TEXT', text);
       const l = lang ? replaceConstString(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'TTS_REF_LANG', lang) : true;
+      const p = updateRefAudioPath(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), versionedName);
+      fs.writeFileSync(path.join(STATE, 'current-voice.json'), JSON.stringify({ source: item.name || '', sha, refPath: versioned, text, lang: lang || readConstString(fs.readFileSync(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'utf8'), 'TTS_REF_LANG'), updated: Date.now() }, null, 2));
       const kill = killMcp();
       log(`apply ${id}: ref updated, lang=${lang || '(keep)'}, text=${text.slice(0, 40)}, mcp reset=${kill.ok}`);
-      return json(res, 200, { ok: true, backup, refText: a && b, refLang: l, mcp: kill.ok });
+      return json(res, 200, { ok: true, backup, refText: a && b, refLang: l, refAudio: p, refPath: versioned, mcp: kill.ok });
     }
 
     if (req.method === 'POST' && pathname === '/api/voice/test') {
@@ -446,7 +465,8 @@ const server = http.createServer(async (req, res) => {
         dest = g ? `group:${g}` : (cfg.ownerQQ ? `private:${cfg.ownerQQ}` : '');
       }
       if (!dest) return json(res, 400, { ok: false, error: '没有可用发送目标' });
-      const ref = path.join(BRIDGE, 'ref', 'reference.wav');
+      const meta = readJson(path.join(STATE, 'current-voice.json'), {});
+      const ref = (meta.refPath && fs.existsSync(meta.refPath)) ? meta.refPath : path.join(BRIDGE, 'ref', 'reference.wav');
       if (!fs.existsSync(ref)) return json(res, 400, { ok: false, error: '参考音频不存在' });
       const markerFile = path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js');
       const src = fs.readFileSync(markerFile, 'utf8');
