@@ -4,7 +4,8 @@
 const TTS_URL = process.env.GPT_SOVITS_URL ?? 'http://127.0.0.1:9880';
 const TTS_REF_AUDIO = process.env.GPT_SOVITS_REF ?? path.join(ROOT, 'ref', 'reference.wav');
 const TTS_REF_TEXT = process.env.GPT_SOVITS_REF_TEXT
-  ?? "谢谢你，让你看看心爱的真本事，藏好了，走嗯，好逗啊，这就是你的权利吗？";
+  ?? "你好，我是大肥鱼。";
+const TTS_REF_LANG = process.env.GPT_SOVITS_REF_LANG ?? "zh";
 const TTS_MAX_CHARS = 80;
 
 server.tool(
@@ -41,7 +42,7 @@ server.tool(
           text_lang: 'zh',
           ref_audio_path: TTS_REF_AUDIO,
           prompt_text: TTS_REF_TEXT,
-          prompt_lang: 'zh',
+          prompt_lang: TTS_REF_LANG,
           media_type: 'wav',
           streaming_mode: false,
           text_split_method: 'cut5'

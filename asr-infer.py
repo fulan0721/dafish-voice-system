@@ -21,7 +21,8 @@ if sr != 16000:
     sys.exit(0)
 
 recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-    model=model, tokens=tokens, num_threads=4, use_itn=True, language="zh", debug=False
+    model=model, tokens=tokens, num_threads=4, use_itn=True,
+    language=os.environ.get("ASR_LANG", "auto"), debug=False
 )
 stream = recognizer.create_stream()
 stream.accept_waveform(sr, samples)

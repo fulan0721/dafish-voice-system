@@ -10,7 +10,7 @@
 
 - **状态看板**：DSH / SnowLuma / qq-bridge / GPT-SoVITS / GPU 实时状态
 - **服务控制**：一键启动/停止 GPT-SoVITS 与 qq-bridge
-- **音色克隆**：上传 mp3/wav → 自动检测人声区间（最长 9.5 秒）→ 本地 SenseVoice 识别文字 → 试听 → 应用为机器人音色
+- **音色克隆**：上传 mp3/wav → 自动检测人声区间（最长 9.5 秒）→ 本地 SenseVoice 识别文字（支持中/日/英/粤/韩）→ 试听 → 应用为机器人音色
 - **试听发送**：输入一句话，调用 GPT-SoVITS 合成，再走 qq-bridge 的白名单发送链条发成 QQ 语音条
 - **日志**：桥接 / 语音引擎 / 系统日志
 - **注入式集成**：一条命令把 `qq_say_voice` 工具补进已有的 qq-bridge，不改上游仓库结构

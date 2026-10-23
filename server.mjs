@@ -247,23 +247,44 @@ function analyzeSilence(wav16) {
   return { start: Math.max(0, start - 0.1), end: Math.min(duration, end + 0.1), duration };
 }
 
-function updateRefText(file, marker, text) {
+function readConstString(src, marker) {
+  const idx = src.indexOf(marker);
+  if (idx < 0) return '';
+  const q = src.indexOf('??', idx);
+  if (q < 0) return '';
+  let i = q;
+  while (i < src.length && src[i] !== '"' && src[i] !== "'") i++;
+  if (i >= src.length) return '';
+  const quote = src[i];
+  let j = i + 1;
+  while (j < src.length) {
+    if (src[j] === '\\') { j += 2; continue; }
+    if (src[j] === quote) break;
+    j++;
+  }
+  if (j >= src.length) return '';
+  try { return JSON.parse(quote === '"' ? src.slice(i, j + 1) : `"${src.slice(i + 1, j).replace(/"/g, '\\"')}"`); }
+  catch { return src.slice(i + 1, j); }
+}
+
+function replaceConstString(file, marker, text) {
   let s = fs.readFileSync(file, 'utf8');
   const idx = s.indexOf(marker);
   if (idx < 0) return false;
   const q = s.indexOf('??', idx);
   if (q < 0) return false;
-  const quote = s.indexOf("'", q);
-  if (quote < 0) return false;
-  let i = quote + 1;
-  while (i < s.length) {
-    if (s[i] === '\\') { i += 2; continue; }
-    if (s[i] === "'") break;
-    i++;
-  }
+  let i = q;
+  while (i < s.length && s[i] !== '"' && s[i] !== "'") i++;
   if (i >= s.length) return false;
-  const replacement = JSON.stringify(String(text));
-  s = s.slice(0, quote) + replacement + s.slice(i + 1);
+  const quote = s[i];
+  let j = i + 1;
+  while (j < s.length) {
+    if (s[j] === '\\') { j += 2; continue; }
+    if (s[j] === quote) break;
+    j++;
+  }
+  if (j >= s.length) return false;
+  s = s.slice(0, i) + JSON.stringify(String(text)) + s.slice(j + 1);
   fs.writeFileSync(file, s, 'utf8');
   return true;
 }
@@ -327,6 +348,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const data = String(body.data || '');
       const name = String(body.name || 'audio');
+      const lang = String(body.lang || 'auto').trim() || 'auto';
       if (!data) return json(res, 400, { ok: false, error: '缺少音频数据' });
       const buf = Buffer.from(data, 'base64');
       if (buf.length < 1000) return json(res, 400, { ok: false, error: '音频为空或过小' });
@@ -336,7 +358,7 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(upload, buf);
       const wav16 = path.join(TMP, `${id}-16k.wav`);
       const conv = run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', upload, '-ar', '16000', '-ac', '1', wav16], { timeout: 60000 });
-      if (!conv.ok) return json(res, 400, { ok: false, error: `音频转码失败：${conv.out.slice(0, 300)}` });
+      if (!conv.ok) return json(res, 400, { ok: false, error: `音频转码失败：${conv.error || `exit ${conv.code}`} ${String(conv.out).slice(0, 300)}` });
       const { start, end, duration } = analyzeSilence(wav16);
       const seconds = Math.min(9.5, Math.max(1, end - start));
       const wav32 = path.join(TMP, `${id}-32k.wav`);
@@ -344,12 +366,12 @@ const server = http.createServer(async (req, res) => {
       if (!trim.ok) return json(res, 400, { ok: false, error: `截取失败：${trim.out.slice(0, 300)}` });
       const wav16Trim = path.join(TMP, `${id}-16k-trim.wav`);
       run(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(start), '-t', String(seconds), '-i', wav16, '-ar', '16000', '-ac', '1', wav16Trim], { timeout: 60000 });
-      const asr = run(PY, [ASR_SCRIPT, wav16Trim], { timeout: 180000, env: { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
+      const asr = run(PY, [ASR_SCRIPT, wav16Trim], { timeout: 180000, env: { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', ASR_LANG: lang } });
       const text = asr.ok ? String(asr.out).trim().split(/\r?\n/).pop() || '' : '';
-      analyses.set(id, { wav32, text, seconds, createdAt: Date.now() });
+      analyses.set(id, { wav32, text, seconds, lang, createdAt: Date.now() });
       log(`analyze ${id}: ${seconds.toFixed(2)}s text=${text.slice(0, 40)}`);
       return json(res, 200, {
-        ok: true, id, text, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)),
+        ok: true, id, text, lang, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)),
         sourceDuration: Number(duration.toFixed(2)), seconds: Number(seconds.toFixed(2)),
         audio: fs.readFileSync(wav32).toString('base64')
       });
@@ -359,6 +381,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const id = String(body.id || '');
       const text = String(body.text || '').trim();
+      const lang = String(body.lang || '').trim();
       const item = analyses.get(id);
       if (!item) return json(res, 400, { ok: false, error: '分析结果已过期，请重新上传' });
       if (!text) return json(res, 400, { ok: false, error: '参考文字不能为空' });
@@ -367,11 +390,12 @@ const server = http.createServer(async (req, res) => {
       const target = path.join(BRIDGE, 'ref', 'reference.wav');
       if (fs.existsSync(target)) fs.copyFileSync(target, backup);
       fs.copyFileSync(item.wav32, target);
-      const a = updateRefText(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'TTS_REF_TEXT', text);
-      const b = updateRefText(path.join(BRIDGE, 'src', 'mcp-voice-tts.js'), 'REF_TEXT', text);
+      const a = replaceConstString(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'TTS_REF_TEXT', text);
+      const b = replaceConstString(path.join(BRIDGE, 'src', 'mcp-voice-tts.js'), 'REF_TEXT', text);
+      const l = lang ? replaceConstString(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'TTS_REF_LANG', lang) : true;
       const kill = killMcp();
-      log(`apply ${id}: ref updated, text=${text.slice(0, 40)}, mcp reset=${kill.ok}`);
-      return json(res, 200, { ok: true, backup, refText: a && b, mcp: kill.ok });
+      log(`apply ${id}: ref updated, lang=${lang || '(keep)'}, text=${text.slice(0, 40)}, mcp reset=${kill.ok}`);
+      return json(res, 200, { ok: true, backup, refText: a && b, refLang: l, mcp: kill.ok });
     }
 
     if (req.method === 'POST' && pathname === '/api/voice/test') {
@@ -390,20 +414,15 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(ref)) return json(res, 400, { ok: false, error: '参考音频不存在' });
       const markerFile = path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js');
       const src = fs.readFileSync(markerFile, 'utf8');
-      const i = src.indexOf('TTS_REF_TEXT');
-      let promptText = '';
-      if (i >= 0) {
-        const q = src.indexOf("'", src.indexOf('??', i));
-        const e = src.indexOf("'", q + 1);
-        if (q >= 0 && e > q) promptText = src.slice(q + 1, e).replace(/\\'/g, "'");
-      }
+      const promptText = readConstString(src, 'TTS_REF_TEXT');
+      const refLang = readConstString(src, 'TTS_REF_LANG') || 'zh';
       const t0 = Date.now();
       let audio;
       try {
         const r = await fetch('http://127.0.0.1:9880/tts', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, text_lang: 'zh', ref_audio_path: ref, prompt_text: promptText, prompt_lang: 'zh', media_type: 'wav', streaming_mode: false, text_split_method: 'cut5' }),
+          body: JSON.stringify({ text, text_lang: 'zh', ref_audio_path: ref, prompt_text: promptText, prompt_lang: refLang, media_type: 'wav', streaming_mode: false, text_split_method: 'cut5' }),
           signal: AbortSignal.timeout(180000)
         });
         if (!r.ok) return json(res, 400, { ok: false, error: `TTS ${r.status}: ${(await r.text()).slice(0, 300)}` });
