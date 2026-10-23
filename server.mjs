@@ -220,6 +220,23 @@ function startBridge() {
   return { ok: true, started: true };
 }
 
+function wavDuration(buf) {
+  try {
+    if (buf.toString('ascii', 0, 4) !== 'RIFF') return null;
+    let off = 12;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString('ascii', off, off + 4);
+      const size = buf.readUInt32LE(off + 4);
+      if (id === 'data') {
+        const byteRate = buf.readUInt32LE(28);
+        return byteRate ? Number((size / byteRate).toFixed(2)) : null;
+      }
+      off += 8 + size + (size % 2);
+    }
+  } catch {}
+  return null;
+}
+
 function analyzeSilence(wav16) {
   const r = run(FFMPEG, ['-hide_banner', '-i', wav16, '-af', 'silencedetect=noise=-32dB:d=0.25', '-f', 'null', '-'], { timeout: 60000 });
   const text = `${r.out}`;
@@ -314,6 +331,25 @@ const server = http.createServer(async (req, res) => {
   if (supplied !== TOKEN) { json(res, 401, { ok: false, error: 'unauthorized' }); return; }
 
   try {
+    if (req.method === 'GET' && pathname === '/api/voice/current') {
+      const ref = path.join(BRIDGE, 'ref', 'reference.wav');
+      if (!fs.existsSync(ref)) return json(res, 200, { ok: false, error: '还没有参考音频' });
+      const buf = fs.readFileSync(ref);
+      const st = fs.statSync(ref);
+      const src = fs.readFileSync(path.join(BRIDGE, 'src', 'mcp-snowluma-safe.js'), 'utf8');
+      return json(res, 200, {
+        ok: true,
+        file: ref,
+        size: buf.length,
+        mtime: st.mtimeMs,
+        updated: fmtTime(st.mtimeMs),
+        sha: crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12),
+        seconds: wavDuration(buf),
+        text: readConstString(src, 'TTS_REF_TEXT'),
+        lang: readConstString(src, 'TTS_REF_LANG'),
+      });
+    }
+
     if (req.method === 'GET' && pathname === '/api/status') {
       return json(res, 200, await getStatus());
     }

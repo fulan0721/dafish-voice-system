@@ -82,6 +82,20 @@
   </section>
 
   <section>
+    <h2>当前音色</h2>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div class="value" id="cur-title">—</div>
+          <div class="hint" id="cur-meta"></div>
+          <div class="hint" id="cur-text" style="margin-top:6px;"></div>
+        </div>
+        <button id="cur-refresh">刷新</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2>音色克隆</h2>
     <div class="panel">
       <div class="row">
@@ -192,6 +206,17 @@ $('bridge-start').onclick = () => service('bridge', 'start');
 $('bridge-stop').onclick = () => service('bridge', 'stop');
 $('refresh').onclick = refresh;
 
+async function loadCurrent() {
+  try {
+    const c = await api('/api/voice/current');
+    if (!c.ok) { $('cur-title').textContent = '还没有参考音频'; $('cur-meta').textContent = ''; $('cur-text').textContent = ''; return; }
+    $('cur-title').textContent = `${c.seconds ?? '?'} 秒 · ${c.lang || '?'} · 指纹 ${c.sha}`;
+    $('cur-meta').textContent = `更新于 ${c.updated} · ${Math.round(c.size / 1024)} KB`;
+    $('cur-text').textContent = `参考文字：${c.text || '（空）'}`;
+  } catch (e) { $('cur-title').textContent = '读取失败：' + e.message; }
+}
+$('cur-refresh').onclick = loadCurrent;
+
 let analysis = null;
 $('analyze').onclick = async () => {
   const file = $('audio').files[0];
@@ -222,6 +247,7 @@ $('apply').onclick = async () => {
     const r = await api('/api/voice/apply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: analysis.id, text: $('voice-text').value, lang: analysis.lang || $('lang').value }) });
     msg.className = 'msg ok';
     msg.textContent = `已应用。旧音色备份：${r.backup}。MCP 已重置${r.refText ? '' : '（参考文字写入失败，请检查）'}。`;
+    loadCurrent();
   } catch (e) { msg.className = 'msg err'; msg.textContent = '应用失败：' + e.message; }
 };
 
@@ -254,6 +280,7 @@ $('log-refresh').onclick = loadLog;
 
 refresh();
 loadLog();
+loadCurrent();
 setInterval(refresh, 5000);
 setInterval(loadLog, 10000);
 </script>
