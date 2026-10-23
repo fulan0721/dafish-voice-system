@@ -1,0 +1,9 @@
+{
+  "port": 3200,
+  "bridgeRoot": "../qq-bridge-main",
+  "ttsHome": "D:/GPT-SoVITS/GPT-SoVITS-main",
+  "python": "D:/GPT-SoVITS/python310/tools/python.exe",
+  "ffmpeg": "D:/GPT-SoVITS/bin/ffmpeg.exe",
+  "asrModelDir": "",
+  "ttsLog": ""
+}

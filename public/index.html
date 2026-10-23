@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼语音系统</title>
+<style>
+  :root { --bg:#0b1020; --card:#151b30; --line:#242c48; --text:#e8ecf8; --muted:#8b95b5; --ok:#3ddc97; --bad:#ff5d73; --warn:#ffc857; --accent:#7aa2ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:radial-gradient(1200px 600px at 20% -10%, #1b2550, transparent), var(--bg); color:var(--text); font:14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:28px 20px 60px; }
+  header { display:flex; align-items:center; gap:14px; margin-bottom:22px; }
+  .logo { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,#4f7cff,#9b6bff); display:grid; place-items:center; font-size:22px; }
+  h1 { font-size:22px; margin:0; letter-spacing:.5px; }
+  .sub { color:var(--muted); font-size:12px; }
+  .spacer { flex:1; }
+  button { background:#202a4a; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 14px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:linear-gradient(135deg,#3f6bff,#7a5cff); border:none; }
+  button.danger { background:#3a1c2a; border-color:#5b2a3c; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  @media (max-width:980px){ .grid { grid-template-columns:repeat(2,1fr); } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .card .label { color:var(--muted); font-size:12px; }
+  .card .value { font-size:16px; font-weight:600; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .detail { color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:#5b6380; }
+  .dot.ok { background:var(--ok); box-shadow:0 0 10px var(--ok); }
+  .dot.bad { background:var(--bad); }
+  .dot.warn { background:var(--warn); }
+  section { margin-top:24px; }
+  h2 { font-size:15px; margin:0 0 12px; color:#cdd6f4; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  textarea { width:100%; min-height:74px; background:#0e1428; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit; resize:vertical; }
+  input[type=text] { background:#0e1428; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 10px; font:inherit; }
+  input[type=file] { color:var(--muted); }
+  audio { width:100%; margin-top:10px; }
+  .hint { color:var(--muted); font-size:12px; }
+  .msg { margin-top:10px; padding:9px 12px; border-radius:9px; font-size:13px; display:none; }
+  .msg.ok { display:block; background:#113326; color:#b7f7d8; }
+  .msg.err { display:block; background:#3a1620; color:#ffc3cd; }
+  pre { background:#0a0f20; border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; max-height:340px; color:#aeb9d8; font-size:12px; }
+  .tabs { display:flex; gap:8px; margin-bottom:10px; }
+  .tabs button.active { border-color:var(--accent); color:#fff; }
+  .overlay { position:fixed; inset:0; background:rgba(5,8,18,.88); display:none; place-items:center; }
+  .overlay.show { display:grid; }
+  .overlay .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; width:340px; }
+  .foot { color:#5d6785; font-size:11px; margin-top:28px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🐟</div>
+    <div>
+      <h1>大肥鱼语音系统</h1>
+      <div class="sub" id="clock">本地控制台 · 127.0.0.1:3200</div>
+    </div>
+    <div class="spacer"></div>
+    <button id="refresh">刷新状态</button>
+  </header>
+
+  <div class="grid">
+    <div class="card"><div class="label">DSH</div><div class="value" id="s-dsh">—</div><div class="detail" id="s-dsh-d"></div></div>
+    <div class="card"><div class="label">SnowLuma / QQ</div><div class="value" id="s-sl">—</div><div class="detail" id="s-sl-d"></div></div>
+    <div class="card"><div class="label">桥接</div><div class="value" id="s-bridge">—</div><div class="detail" id="s-bridge-d"></div></div>
+    <div class="card"><div class="label">GPT-SoVITS</div><div class="value" id="s-tts">—</div><div class="detail" id="s-tts-d"></div></div>
+    <div class="card"><div class="label">GPU</div><div class="value" id="s-gpu">—</div><div class="detail" id="s-gpu-d"></div></div>
+  </div>
+
+  <section>
+    <h2>服务控制</h2>
+    <div class="panel row">
+      <button id="tts-start" class="primary">启动语音引擎</button>
+      <button id="tts-stop" class="danger">停止语音引擎</button>
+      <button id="bridge-start" class="primary">启动桥接</button>
+      <button id="bridge-stop" class="danger">停止桥接</button>
+      <span class="hint">SnowLuma 由你自己启动/扫码，这里只做状态检测。</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>音色克隆</h2>
+    <div class="panel">
+      <div class="row">
+        <input type="file" id="audio" accept="audio/*,.mp3,.wav,.m4a,.ogg">
+        <button id="analyze" class="primary">上传并分析</button>
+        <span class="hint">自动截取人声（最长 9.5 秒）并识别文字</span>
+      </div>
+      <div id="voice-result" style="display:none; margin-top:14px;">
+        <div class="hint" id="voice-meta"></div>
+        <audio id="voice-audio" controls></audio>
+        <div style="margin-top:10px;">
+          <div class="hint" style="margin-bottom:6px;">参考音频对应的文字（务必逐字准确，错了音色会飘）</div>
+          <textarea id="voice-text"></textarea>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="apply" class="primary">应用为机器人音色</button>
+          <button id="test" class="primary">合成并发送测试</button>
+          <input type="text" id="target" placeholder="目标：private:QQ号 或 group:群号（留空=owner）" style="min-width:300px;">
+        </div>
+        <div id="voice-msg" class="msg"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>日志</h2>
+    <div class="tabs">
+      <button data-log="bridge" class="active">桥接</button>
+      <button data-log="tts">语音引擎</button>
+      <button data-log="system">系统</button>
+      <button id="log-refresh">刷新日志</button>
+    </div>
+    <pre id="log">加载中…</pre>
+  </section>
+
+  <div class="foot">仅监听 127.0.0.1 · 令牌保存在 state/sys-token</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="box">
+    <h2 style="margin-top:0;">需要访问令牌</h2>
+    <p class="hint">打开控制台时带上的 <code>?token=...</code>，或从 <code>state/sys-token</code> 复制。</p>
+    <input type="text" id="token-input" style="width:100%;" placeholder="粘贴令牌">
+    <div class="row" style="margin-top:12px;"><button class="primary" id="token-save">进入</button></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('qvs-token') || '';
+if (TOKEN) localStorage.setItem('qvs-token', TOKEN);
+
+function authHeaders() { return { 'x-sys-token': TOKEN }; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), ...authHeaders() } });
+  if (res.status === 401) { $('overlay').classList.add('show'); throw new Error('unauthorized'); }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.ok === false) throw new Error(j.error || `HTTP ${res.status}`);
+  return j;
+}
+
+$('token-save').onclick = () => {
+  TOKEN = $('token-input').value.trim();
+  localStorage.setItem('qvs-token', TOKEN);
+  $('overlay').classList.remove('show');
+  refresh();
+};
+
+function setCard(id, ok, value, detail) {
+  const el = $(id);
+  el.innerHTML = `<span class="dot ${ok ? 'ok' : 'bad'}"></span>${value}`;
+  const d = $(id + '-d');
+  if (d) d.textContent = detail || '';
+}
+
+async function refresh() {
+  try {
+    const s = await api('/api/status');
+    setCard('s-dsh', s.dsh.ok, s.dsh.ok ? '已连接' : '未连接', s.dsh.url);
+    setCard('s-sl', s.snowluma.ok, s.snowluma.ok ? (s.botName || s.snowluma.nickname || '在线') : '离线', s.snowluma.ok ? `QQ ${s.snowluma.userId}` : `端口 ${s.snowluma.port}`);
+    setCard('s-bridge', s.bridge.ok, s.bridge.ok ? `运行中 · ${s.bridge.mode || ''}` : '未运行', s.bridge.ok ? `DSH ${s.bridge.dshReady ? '就绪' : '未就绪'} · 端口 3100` : '端口 3100');
+    setCard('s-tts', s.tts.ok, s.tts.ok ? '运行中' : '未运行', s.tts.ok ? '端口 9880' : '点上方启动');
+    setCard('s-gpu', !!(s.gpu && s.gpu.total), s.gpu ? `${s.gpu.used}/${s.gpu.total} MB` : '不可用', s.gpu ? `利用率 ${s.gpu.util}%` : '');
+    $('clock').textContent = `本地控制台 · ${s.time} · 机器人：${s.botName || '大肥鱼'}`;
+  } catch (e) { /* handled */ }
+}
+
+async function service(name, action) {
+  try {
+    const r = await api('/api/service', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, action }) });
+    alert(action === 'start' ? (r.already ? '已经在运行' : '已启动') : (r.already ? '本来就没运行' : '已停止'));
+  } catch (e) { alert('操作失败：' + e.message); }
+  refresh();
+}
+
+$('tts-start').onclick = () => service('tts', 'start');
+$('tts-stop').onclick = () => service('tts', 'stop');
+$('bridge-start').onclick = () => service('bridge', 'start');
+$('bridge-stop').onclick = () => service('bridge', 'stop');
+$('refresh').onclick = refresh;
+
+let analysis = null;
+$('analyze').onclick = async () => {
+  const file = $('audio').files[0];
+  if (!file) return alert('先选一个音频文件');
+  const msg = $('voice-msg'); msg.className = 'msg'; msg.style.display = 'none';
+  $('analyze').disabled = true; $('analyze').textContent = '分析中…';
+  try {
+    const buf = await file.arrayBuffer();
+    const data = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const r = await api('/api/voice/analyze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: file.name, data }) });
+    analysis = r;
+    $('voice-result').style.display = 'block';
+    $('voice-meta').textContent = `原音频 ${r.sourceDuration}s，截取 ${r.seconds}s（${r.start}s ~ ${r.end}s）`;
+    $('voice-text').value = r.text || '';
+    $('voice-audio').src = 'data:audio/wav;base64,' + r.audio;
+    msg.className = 'msg ok'; msg.textContent = '分析完成，请核对文字后应用或试听。';
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = '分析失败：' + e.message;
+  } finally {
+    $('analyze').disabled = false; $('analyze').textContent = '上传并分析';
+  }
+};
+
+$('apply').onclick = async () => {
+  if (!analysis) return;
+  const msg = $('voice-msg');
+  try {
+    const r = await api('/api/voice/apply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: analysis.id, text: $('voice-text').value }) });
+    msg.className = 'msg ok';
+    msg.textContent = `已应用。旧音色备份：${r.backup}。MCP 已重置${r.refText ? '' : '（参考文字写入失败，请检查）'}。`;
+  } catch (e) { msg.className = 'msg err'; msg.textContent = '应用失败：' + e.message; }
+};
+
+$('test').onclick = async () => {
+  const msg = $('voice-msg');
+  $('test').disabled = true; $('test').textContent = '合成中…';
+  try {
+    const r = await api('/api/voice/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: $('voice-text').value || '你好，我是大肥鱼。', target: $('target').value.trim() }) });
+    msg.className = 'msg ok';
+    msg.textContent = `已发送到 ${r.target}，messageId=${r.messageId || '未知'}，耗时 ${r.ms}ms。`;
+  } catch (e) { msg.className = 'msg err'; msg.textContent = '发送失败：' + e.message; }
+  finally { $('test').disabled = false; $('test').textContent = '合成并发送测试'; }
+};
+
+let logName = 'bridge';
+document.querySelectorAll('[data-log]').forEach((b) => {
+  b.onclick = () => {
+    logName = b.dataset.log;
+    document.querySelectorAll('[data-log]').forEach((x) => x.classList.toggle('active', x === b));
+    loadLog();
+  };
+});
+async function loadLog() {
+  try {
+    const r = await api(`/api/logs?name=${logName}&lines=160`);
+    $('log').textContent = r.text || '（空）';
+  } catch (e) { $('log').textContent = '日志加载失败：' + e.message; }
+}
+$('log-refresh').onclick = loadLog;
+
+refresh();
+loadLog();
+setInterval(refresh, 5000);
+setInterval(loadLog, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "dafish-voice-system",
+  "version": "0.1.0",
+  "description": "Local web console for qq-bridge + GPT-SoVITS: service status, one-click start/stop, voice cloning, TTS test send and logs.",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "start": "node server.mjs",
+    "patch-bridge": "node integration/patch-bridge.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "qq-bridge",
+    "gpt-sovits",
+    "tts",
+    "voice-clone",
+    "deepseek-harness"
+  ]
+}
